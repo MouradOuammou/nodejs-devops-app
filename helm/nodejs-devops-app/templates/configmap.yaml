@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nodejs-devops-app.fullname" . }}-config
+  labels:
+    {{- include "nodejs-devops-app.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  PORT: "3000"
