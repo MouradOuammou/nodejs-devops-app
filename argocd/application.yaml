@@ -10,10 +10,12 @@ spec:
     targetRevision: HEAD
     path: helm/nodejs-devops-app
     helm:
-      values:
+      values: |
         image:
           repository: MouradOuammou/nodejs-devops-app
           tag: latest
+        ingress:
+          enabled: false  # Désactive l'ingress si vous ne l'utilisez pas
   destination:
     server: https://kubernetes.default.svc
     namespace: devops-demo
@@ -22,4 +24,4 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+    - CreateNamespace=true

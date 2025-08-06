@@ -25,7 +25,7 @@ spec:
               service:
                 name: {{ include "nodejs-devops-app.fullname" $ }}
                 port:
-                  number: {{ $root.Values.service.port }}
+                  number: {{ $.Values.service.port }}
         {{- end }}
   {{- end }}
   {{- if .Values.ingress.tls }}
