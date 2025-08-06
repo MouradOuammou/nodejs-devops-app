@@ -15,7 +15,7 @@ spec:
           repository: MouradOuammou/nodejs-devops-app
           tag: latest
         ingress:
-          enabled: false  # Désactive l'ingress si vous ne l'utilisez pas
+          enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: devops-demo
