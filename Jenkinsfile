@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         DOCKER_HUB = credentials('docker-hub')
-        KUBECONFIG = credentials('kubeconfig')
+        KUBECONFIG = credentials('k8s-token')
         HELM_VERSION = '3.12.0'
         NAMESPACE = 'devops-demo'
     }
