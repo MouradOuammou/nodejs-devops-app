@@ -6,7 +6,7 @@ pipeline {
         KUBECONFIG = credentials('k8s-token')
         HELM_VERSION = '3.12.0'
         NAMESPACE = 'devops-demo'
-        SLACK_TOKEN_ID = 'slack-token-id' // ID du token Slack (à créer dans Jenkins Credentials)
+        SLACK_TOKEN_ID = 'slack-token-id'
     }
 
     stages {
