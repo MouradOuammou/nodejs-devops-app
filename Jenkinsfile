@@ -56,11 +56,11 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Clean Deploy') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
                     script {
-                        echo "Deploying to Kubernetes..."
+                        echo "Clean deployment to Kubernetes..."
                         sh '''
                             # Vérification rapide de Kubernetes
                             kubectl get nodes --no-headers | head -1
@@ -71,23 +71,30 @@ pipeline {
                                 exit 1
                             fi
 
-                            # Créer le namespace s'il n'existe pas
-                            kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-
-                            # Déploiement avec Helm upgrade --install (intelligent et rapide)
-                            echo "Deploying with Helm..."
-                            helm upgrade --install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
+                            # Force cleanup - supprimer tout proprement
+                            echo "Force cleaning existing resources..."
+                            kubectl delete namespace ${NAMESPACE} --ignore-not-found=true || true
+                            
+                            # Attendre que le namespace soit complètement supprimé
+                            echo "Waiting for namespace cleanup..."
+                            sleep 10
+                            
+                            # Recréer le namespace proprement
+                            kubectl create namespace ${NAMESPACE}
+                            
+                            # Déploiement avec Helm install (installation fraîche)
+                            echo "Fresh deployment with Helm..."
+                            helm install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
                                 --set image.repository=$DOCKER_HUB_USR/${DOCKER_IMAGE_NAME} \
                                 --set image.tag=${BUILD_NUMBER} \
                                 --namespace ${NAMESPACE} \
                                 --wait \
-                                --timeout=5m \
-                                --atomic
+                                --timeout=5m
 
                             # Vérification du déploiement
                             echo "Deployment successful! Checking status..."
-                            kubectl get pods -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE}
-                            kubectl get services -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE}
+                            kubectl get pods -n ${NAMESPACE}
+                            kubectl get services -n ${NAMESPACE}
                             
                             # Afficher l'URL d'accès (pour minikube)
                             echo "=== APPLICATION ACCESS ==="
@@ -156,8 +163,8 @@ pipeline {
                 Build: ${env.BUILD_NUMBER}
                 Status: ${currentBuild.currentResult}
                 Duration: ${currentBuild.durationString}
-                Image: ${env.DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
-                Namespace: ${NAMESPACE}
+                Image: ${env.DOCKER_HUB_USR}/${env.DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER}
+                Namespace: ${env.NAMESPACE}
                 =================================
                 """
             }
