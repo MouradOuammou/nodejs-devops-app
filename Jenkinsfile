@@ -35,11 +35,12 @@ pipeline {
                         passwordVariable: 'DOCKER_HUB_PSW'
                     )
                 ]) {
-                    sh '''
-                        docker login -u $DOCKER_HUB_USR -p $DOCKER_HUB_PSW
-                        docker tag nodejs-devops-app:${BUILD_NUMBER} $DOCKER_HUB_USR/nodejs-devops-app:${BUILD_NUMBER}
-                        docker push $DOCKER_HUB_USR/nodejs-devops-app:${BUILD_NUMBER}
-                    '''
+sh """
+  docker login -u $DOCKER_HUB_USR -p $DOCKER_HUB_PSW
+  docker tag nodejs-devops-app:$BUILD_NUMBER $DOCKER_HUB_USR/nodejs-devops-app:$BUILD_NUMBER
+  docker push $DOCKER_HUB_USR/nodejs-devops-app:$BUILD_NUMBER
+"""
+
                 }
             }
         }
