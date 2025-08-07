@@ -58,68 +58,65 @@ pipeline {
 
         stage('Pre-Deploy Cleanup') {
             steps {
-                withCredentials([file(credentialsId: 'k8s-token', variable: 'KUBECONFIG')]) {
-                    script {
-                        echo "Cleaning up existing resources..."
-                        sh '''
-                            # Vérifier la connexion Kubernetes
-                            kubectl version --client
-                            kubectl cluster-info
+                script {
+                    echo "Cleaning up existing resources..."
+                    sh '''
+                        # Vérifier la connexion Kubernetes
+                        echo "Testing Kubernetes connection..."
+                        kubectl cluster-info
+                        kubectl get nodes
+                        
+                        # Créer le namespace s'il n'existe pas
+                        kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
-                            # Créer le namespace s'il n'existe pas
-                            kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                        # Supprimer toutes les ressources liées à l'ancienne release
+                        echo "Removing existing Helm release and related resources..."
+                        helm uninstall ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} || true
 
-                            # Supprimer toutes les ressources liées à l'ancienne release
-                            echo "Removing existing Helm release and related resources..."
-                            helm uninstall ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} || true
+                        # Attendre que les ressources soient supprimées
+                        sleep 10
 
-                            # Attendre que les ressources soient supprimées
-                            sleep 10
+                        # Force cleanup des ressources restantes
+                        kubectl delete all,pdb,configmap,secret,ingress,networkpolicy -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
+                        kubectl delete pdb ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
 
-                            # Force cleanup des ressources restantes
-                            kubectl delete all,pdb,configmap,secret,ingress,networkpolicy -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
-                            kubectl delete pdb ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
+                        # Attendre le nettoyage complet
+                        sleep 5
 
-                            # Attendre le nettoyage complet
-                            sleep 5
-
-                            echo "Cleanup completed"
-                        '''
-                    }
+                        echo "Cleanup completed"
+                    '''
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                withCredentials([file(credentialsId: 'k8s-token', variable: 'KUBECONFIG')]) {
-                    withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
-                        script {
-                            echo "Deploying to Kubernetes..."
-                            sh '''
-                                # Vérifier que le chart Helm existe
-                                if [ ! -d "./helm/${DOCKER_IMAGE_NAME}" ]; then
-                                    echo "Error: Helm chart directory not found at ./helm/${DOCKER_IMAGE_NAME}"
-                                    exit 1
-                                fi
+                withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
+                    script {
+                        echo "Deploying to Kubernetes..."
+                        sh '''
+                            # Vérifier que le chart Helm existe
+                            if [ ! -d "./helm/${DOCKER_IMAGE_NAME}" ]; then
+                                echo "Error: Helm chart directory not found at ./helm/${DOCKER_IMAGE_NAME}"
+                                exit 1
+                            fi
 
-                                # Déployer avec Helm (installation fraîche après cleanup)
-                                echo "Installing with Helm..."
-                                helm install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
-                                    --set image.repository=$DOCKER_HUB_USR/${DOCKER_IMAGE_NAME} \
-                                    --set image.tag=${BUILD_NUMBER} \
-                                    --namespace ${NAMESPACE} \
-                                    --create-namespace \
-                                    --wait \
-                                    --timeout=10m
+                            # Déployer avec Helm (installation fraîche après cleanup)
+                            echo "Installing with Helm..."
+                            helm install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
+                                --set image.repository=$DOCKER_HUB_USR/${DOCKER_IMAGE_NAME} \
+                                --set image.tag=${BUILD_NUMBER} \
+                                --namespace ${NAMESPACE} \
+                                --create-namespace \
+                                --wait \
+                                --timeout=10m
 
-                                # Vérifier le déploiement
-                                echo "Checking deployment status..."
-                                kubectl get pods -n ${NAMESPACE}
-                                kubectl get services -n ${NAMESPACE}
-                                kubectl get pdb -n ${NAMESPACE} || true
-                            '''
-                        }
+                            # Vérifier le déploiement
+                            echo "Checking deployment status..."
+                            kubectl get pods -n ${NAMESPACE}
+                            kubectl get services -n ${NAMESPACE}
+                            kubectl get pdb -n ${NAMESPACE} || true
+                        '''
                     }
                 }
             }
