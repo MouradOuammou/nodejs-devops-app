@@ -5,7 +5,7 @@ pipeline {
         HELM_VERSION = '3.12.0'
         NAMESPACE = 'devops-demo'
         SLACK_TOKEN_ID = 'slack-token-id'
-        KUBECONFIG = '/var/lib/jenkins/.kube/config'
+        DOCKER_IMAGE_NAME = 'nodejs-devops-app'
     }
 
     stages {
@@ -17,13 +17,19 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'docker build -t nodejs-devops-app:${BUILD_NUMBER} .'
+                script {
+                    echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}"
+                    sh "docker build -t ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} ."
+                }
             }
         }
 
         stage('Test') {
             steps {
-                sh 'docker run --rm nodejs-devops-app:${BUILD_NUMBER} npm test'
+                script {
+                    echo "Running tests..."
+                    sh "docker run --rm ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} npm test"
+                }
             }
         }
 
@@ -36,54 +42,85 @@ pipeline {
                         passwordVariable: 'DOCKER_HUB_PSW'
                     )
                 ]) {
-                    sh """
-                        echo \$DOCKER_HUB_PSW | docker login -u \$DOCKER_HUB_USR --password-stdin
-                        docker tag nodejs-devops-app:\${BUILD_NUMBER} \$DOCKER_HUB_USR/nodejs-devops-app:\${BUILD_NUMBER}
-                        docker push \$DOCKER_HUB_USR/nodejs-devops-app:\${BUILD_NUMBER}
-                    """
+                    script {
+                        echo "Pushing image to Docker Hub..."
+                        sh '''
+                            echo "$DOCKER_HUB_PSW" | docker login -u "$DOCKER_HUB_USR" --password-stdin
+                            docker tag ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} $DOCKER_HUB_USR/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
+                            docker tag ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} $DOCKER_HUB_USR/${DOCKER_IMAGE_NAME}:latest
+                            docker push $DOCKER_HUB_USR/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
+                            docker push $DOCKER_HUB_USR/${DOCKER_IMAGE_NAME}:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Pre-Deploy Cleanup') {
+            steps {
+                withCredentials([file(credentialsId: 'k8s-token', variable: 'KUBECONFIG')]) {
+                    script {
+                        echo "Cleaning up existing resources..."
+                        sh '''
+                            # Vérifier la connexion Kubernetes
+                            kubectl version --client
+                            kubectl cluster-info
+                            
+                            # Créer le namespace s'il n'existe pas
+                            kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                            
+                            # Supprimer toutes les ressources liées à l'ancienne release
+                            echo "Removing existing Helm release and related resources..."
+                            helm uninstall ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} || true
+                            
+                            # Attendre que les ressources soient supprimées
+                            sleep 10
+                            
+                            # Force cleanup of any remaining resources
+                            kubectl delete all,pdb,configmap,secret,ingress,networkpolicy -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
+                            kubectl delete pdb ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
+                            
+                            # Attendre que toutes les ressources soient nettoyées
+                            sleep 5
+                            
+                            echo "Cleanup completed"
+                        '''
+                    }
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'docker-hub', 
-                        usernameVariable: 'DOCKER_HUB_USR', 
-                        passwordVariable: 'DOCKER_HUB_PSW'
-                    )
-                ]) {
-                    sh '''
-                        # Vérifier que kubectl fonctionne
-                        kubectl version --client
-                        kubectl cluster-info
-                        
-                        # Créer le namespace
-                        kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-                        
-                        # Si vous utilisez Helm
-                        if [ -d "./helm/nodejs-devops-app" ]; then
-                            echo "Deploying with Helm..."
-                            helm upgrade --install nodejs-devops-app ./helm/nodejs-devops-app \
-                                --set image.repository=$DOCKER_HUB_USR/nodejs-devops-app \
-                                --set image.tag=${BUILD_NUMBER} \
-                                --namespace ${NAMESPACE} \
-                                --create-namespace \
-                                --atomic \
-                                --wait
-                        else
-                            echo "Deploying with kubectl..."
-                            # Remplacer les placeholders dans les manifests k8s
-                            sed -i "s|IMAGE_PLACEHOLDER|$DOCKER_HUB_USR/nodejs-devops-app:${BUILD_NUMBER}|g" k8s/*.yaml
-                            kubectl apply -f k8s/ -n ${NAMESPACE}
-                            kubectl rollout status deployment/nodejs-devops-app -n ${NAMESPACE} --timeout=300s
-                        fi
-                        
-                        # Vérifier le déploiement
-                        kubectl get pods -n ${NAMESPACE}
-                        kubectl get services -n ${NAMESPACE}
-                    '''
+                withCredentials([file(credentialsId: 'k8s-token', variable: 'KUBECONFIG')]) {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
+                        script {
+                            echo "Deploying to Kubernetes..."
+                            sh '''
+                                # Vérifier si le chart Helm existe
+                                if [ ! -d "./helm/${DOCKER_IMAGE_NAME}" ]; then
+                                    echo "Error: Helm chart directory not found at ./helm/${DOCKER_IMAGE_NAME}"
+                                    exit 1
+                                fi
+                                
+                                # Déployer avec Helm (fresh install)
+                                echo "Deploying with Helm..."
+                                helm install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
+                                    --set image.repository=$DOCKER_HUB_USR/${DOCKER_IMAGE_NAME} \
+                                    --set image.tag=${BUILD_NUMBER} \
+                                    --namespace ${NAMESPACE} \
+                                    --create-namespace \
+                                    --wait \
+                                    --timeout=10m
+                                
+                                # Vérifier le déploiement
+                                echo "Checking deployment status..."
+                                kubectl get pods -n ${NAMESPACE}
+                                kubectl get services -n ${NAMESPACE}
+                                kubectl get pdb -n ${NAMESPACE} || true
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -91,27 +128,66 @@ pipeline {
 
     post {
         success {
-            slackSend(
-                channel: '#nouveau-canal', 
-                color: "good",
-                message: " SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' deployed successfully!\n🔗 Build URL: ${env.BUILD_URL}",
-                tokenCredentialId: "${SLACK_TOKEN_ID}"
-            )
+            script {
+                try {
+                    slackSend(
+                        channel: '#nouveau-canal', 
+                        color: "good",
+                        message: ":white_check_mark: *SUCCESS* - Job '${env.JOB_NAME}' [${env.BUILD_NUMBER}]\n:rocket: Application deployed successfully!\n:link: ${env.BUILD_URL}",
+                        tokenCredentialId: "${SLACK_TOKEN_ID}"
+                    )
+                    echo "Slack notification sent successfully"
+                } catch (Exception e) {
+                    echo "Warning: Slack notification failed - ${e.getMessage()}"
+                }
+            }
         }
+        
         failure {
-            slackSend(
-                channel: '#nouveau-canal',
-                color: "danger",
-                message: " FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' failed!\n🔗 Build URL: ${env.BUILD_URL}\n📋 Check logs for details.",
-                tokenCredentialId: "${SLACK_TOKEN_ID}"
-            )
+            script {
+                try {
+                    slackSend(
+                        channel: '#nouveau-canal',
+                        color: "danger",
+                        message: ":x: *FAILED* - Job '${env.JOB_NAME}' [${env.BUILD_NUMBER}]\n:warning: Pipeline failed\n:link: ${env.BUILD_URL}console",
+                        tokenCredentialId: "${SLACK_TOKEN_ID}"
+                    )
+                    echo "Slack failure notification sent successfully"
+                } catch (Exception e) {
+                    echo "Warning: Slack notification failed - ${e.getMessage()}"
+                }
+            }
         }
+        
         always {
-            sh '''
-                docker rmi nodejs-devops-app:${BUILD_NUMBER} || true
-                docker system prune -f || true
-            '''
+            // Nettoyer les images Docker locales
+            script {
+                try {
+                    sh '''
+                        docker rmi ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} || true
+                        docker system prune -f
+                    '''
+                } catch (Exception e) {
+                    echo "Warning: Failed to clean up Docker images - ${e.getMessage()}"
+                }
+            }
+            
+            // Nettoyer le workspace
             cleanWs()
+            
+            // Afficher un résumé
+            script {
+                echo """
+                =================================
+                BUILD SUMMARY
+                =================================
+                Job: ${env.JOB_NAME}
+                Build: ${env.BUILD_NUMBER}
+                Status: ${currentBuild.currentResult}
+                Duration: ${currentBuild.durationString}
+                =================================
+                """
+            }
         }
     }
 }
