@@ -56,66 +56,42 @@ pipeline {
             }
         }
 
-        stage('Pre-Deploy Cleanup') {
-            steps {
-                script {
-                    echo "Cleaning up existing resources..."
-                    sh '''
-                        # Vérifier la connexion Kubernetes
-                        echo "Testing Kubernetes connection..."
-                        kubectl cluster-info
-                        kubectl get nodes
-                        
-                        # Créer le namespace s'il n'existe pas
-                        kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-
-                        # Supprimer toutes les ressources liées à l'ancienne release
-                        echo "Removing existing Helm release and related resources..."
-                        helm uninstall ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} || true
-
-                        # Attendre que les ressources soient supprimées
-                        sleep 10
-
-                        # Force cleanup des ressources restantes
-                        kubectl delete all,pdb,configmap,secret,ingress,networkpolicy -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
-                        kubectl delete pdb ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
-
-                        # Attendre le nettoyage complet
-                        sleep 5
-
-                        echo "Cleanup completed"
-                    '''
-                }
-            }
-        }
-
         stage('Deploy') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
                     script {
                         echo "Deploying to Kubernetes..."
                         sh '''
+                            # Vérification rapide de Kubernetes
+                            kubectl get nodes --no-headers | head -1
+                            
                             # Vérifier que le chart Helm existe
                             if [ ! -d "./helm/${DOCKER_IMAGE_NAME}" ]; then
                                 echo "Error: Helm chart directory not found at ./helm/${DOCKER_IMAGE_NAME}"
                                 exit 1
                             fi
 
-                            # Déployer avec Helm (installation fraîche après cleanup)
-                            echo "Installing with Helm..."
-                            helm install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
+                            # Créer le namespace s'il n'existe pas
+                            kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+                            # Déploiement avec Helm upgrade --install (intelligent et rapide)
+                            echo "Deploying with Helm..."
+                            helm upgrade --install ${DOCKER_IMAGE_NAME} ./helm/${DOCKER_IMAGE_NAME} \
                                 --set image.repository=$DOCKER_HUB_USR/${DOCKER_IMAGE_NAME} \
                                 --set image.tag=${BUILD_NUMBER} \
                                 --namespace ${NAMESPACE} \
-                                --create-namespace \
                                 --wait \
-                                --timeout=10m
+                                --timeout=5m \
+                                --atomic
 
-                            # Vérifier le déploiement
-                            echo "Checking deployment status..."
-                            kubectl get pods -n ${NAMESPACE}
-                            kubectl get services -n ${NAMESPACE}
-                            kubectl get pdb -n ${NAMESPACE} || true
+                            # Vérification du déploiement
+                            echo "Deployment successful! Checking status..."
+                            kubectl get pods -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE}
+                            kubectl get services -l app.kubernetes.io/instance=${DOCKER_IMAGE_NAME} -n ${NAMESPACE}
+                            
+                            # Afficher l'URL d'accès (pour minikube)
+                            echo "=== APPLICATION ACCESS ==="
+                            minikube service ${DOCKER_IMAGE_NAME} -n ${NAMESPACE} --url || echo "Service URL not available"
                         '''
                     }
                 }
@@ -130,7 +106,7 @@ pipeline {
                     slackSend(
                         channel: '#nouveau-canal', 
                         color: "good",
-                        message: ":white_check_mark: *SUCCESS* - Job '${env.JOB_NAME}' [${env.BUILD_NUMBER}]\n:rocket: Application deployed successfully!\n:link: ${env.BUILD_URL}",
+                        message: ":white_check_mark: *SUCCESS* - Job '${env.JOB_NAME}' [${env.BUILD_NUMBER}]\n:rocket: Application deployed successfully to Kubernetes!\n:link: ${env.BUILD_URL}",
                         tokenCredentialId: "${SLACK_TOKEN_ID}"
                     )
                     echo "Slack notification sent successfully"
@@ -160,8 +136,9 @@ pipeline {
             script {
                 try {
                     sh '''
+                        # Cleanup Docker images
                         docker rmi ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} || true
-                        docker system prune -f
+                        docker system prune -f --volumes || true
                     '''
                 } catch (Exception e) {
                     echo "Warning: Failed to clean up Docker images - ${e.getMessage()}"
@@ -179,6 +156,8 @@ pipeline {
                 Build: ${env.BUILD_NUMBER}
                 Status: ${currentBuild.currentResult}
                 Duration: ${currentBuild.durationString}
+                Image: ${env.DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
+                Namespace: ${NAMESPACE}
                 =================================
                 """
             }
