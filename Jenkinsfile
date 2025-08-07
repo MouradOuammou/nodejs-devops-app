@@ -2,8 +2,6 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HUB = credentials('docker-hub')
-        KUBECONFIG = credentials('k8s-token')
         HELM_VERSION = '3.12.0'
         NAMESPACE = 'devops-demo'
         SLACK_TOKEN_ID = 'slack-token-id'
@@ -37,26 +35,30 @@ pipeline {
                         passwordVariable: 'DOCKER_HUB_PSW'
                     )
                 ]) {
-                    sh """
-                        docker login -u ${DOCKER_HUB_USR} -p ${DOCKER_HUB_PSW}
-                        docker tag nodejs-devops-app:${BUILD_NUMBER} ${DOCKER_HUB_USR}/nodejs-devops-app:${BUILD_NUMBER}
-                        docker push ${DOCKER_HUB_USR}/nodejs-devops-app:${BUILD_NUMBER}
-                    """
+                    sh '''
+                        docker login -u $DOCKER_HUB_USR -p $DOCKER_HUB_PSW
+                        docker tag nodejs-devops-app:${BUILD_NUMBER} $DOCKER_HUB_USR/nodejs-devops-app:${BUILD_NUMBER}
+                        docker push $DOCKER_HUB_USR/nodejs-devops-app:${BUILD_NUMBER}
+                    '''
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                sh """
-                    kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-                    helm upgrade --install nodejs-devops-app ./helm/nodejs-devops-app \
-                        --set image.repository=${DOCKER_HUB_USR}/nodejs-devops-app \
-                        --set image.tag=${BUILD_NUMBER} \
-                        --namespace ${NAMESPACE} \
-                        --atomic \
-                        --wait
-                """
+                withCredentials([file(credentialsId: 'k8s-token', variable: 'KUBECONFIG')]) {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_HUB_USR', passwordVariable: 'DOCKER_HUB_PSW')]) {
+                        sh '''
+                            kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                            helm upgrade --install nodejs-devops-app ./helm/nodejs-devops-app \
+                                --set image.repository=$DOCKER_HUB_USR/nodejs-devops-app \
+                                --set image.tag=${BUILD_NUMBER} \
+                                --namespace ${NAMESPACE} \
+                                --atomic \
+                                --wait
+                        '''
+                    }
+                }
             }
         }
     }
@@ -66,7 +68,7 @@ pipeline {
             slackSend(
                 channel: '#nouveau-canal', 
                 color: "good",
-                message: " SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' → ${env.BUILD_URL}",
+                message: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' → ${env.BUILD_URL}",
                 tokenCredentialId: "${SLACK_TOKEN_ID}"
             )
         }
@@ -74,7 +76,7 @@ pipeline {
             slackSend(
                 channel: '#nouveau-canal',
                 color: "danger",
-                message: " FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' → ${env.BUILD_URL}",
+                message: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' → ${env.BUILD_URL}",
                 tokenCredentialId: "${SLACK_TOKEN_ID}"
             )
         }
