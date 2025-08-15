@@ -27,3 +27,10 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
   maxUnavailable: 1
+
+ingress:
+  enabled: false
+  className: ""
+  hosts: []
+  tls: []
+  annotations: {}
