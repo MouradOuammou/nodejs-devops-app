@@ -1,15 +1,13 @@
-# values.yaml
 replicaCount: 2
 
 image:
   repository: mouradouammou/nodejs-devops-app
   tag: latest
-  pullPolicy: Always  # Changé pour s'assurer de toujours récupérer la dernière image
+  pullPolicy: Always
 
 service:
   type: ClusterIP
   port: 3000
-  targetPort: 3000  # Ajouté pour plus de clarté
 
 resources:
   limits:
@@ -24,96 +22,15 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
-  # Ajout pour les métriques de mémoire (optionnel)
-  # targetMemoryUtilizationPercentage: 80
 
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-  # Suppression de maxUnavailable car il ne faut qu'un seul des deux
-  # maxUnavailable: 1
+  maxUnavailable: 1
 
-# Configuration des probes de santé
-healthCheck:
-  enabled: true
-  livenessProbe:
-    httpGet:
-      path: /health
-      port: 3000
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 3
-  readinessProbe:
-    httpGet:
-      path: /ready
-      port: 3000
-    initialDelaySeconds: 5
-    periodSeconds: 5
-    timeoutSeconds: 3
-    failureThreshold: 3
-
-# Configuration de sécurité des pods
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-
-podSecurityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-      - ALL
-  readOnlyRootFilesystem: false
-
-# Labels et annotations
-podLabels:
-  app: nodejs-devops-app
-  version: "1.0.0"
-
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "3000"
-  prometheus.io/path: "/metrics"
-
-# Configuration des variables d'environnement
-env:
-  - name: NODE_ENV
-    value: "production"
-  - name: PORT
-    value: "3000"
-
-# Configuration de l'ingress
 ingress:
   enabled: false
-  className: "nginx"
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
-  hosts:
-    - host: nodejs-app.local
-      paths:
-        - path: /
-          pathType: Prefix
+  className: ""
+  hosts: []
   tls: []
-    # - secretName: nodejs-app-tls
-    #   hosts:
-    #     - nodejs-app.local
-
-# Configuration des tolérances et affinité
-nodeSelector: {}
-
-tolerations: []
-
-affinity:
-  podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values:
-                  - nodejs-devops-app
-          topologyKey: kubernetes.io/hostname
+  annotations: {}
