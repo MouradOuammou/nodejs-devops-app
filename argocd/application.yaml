@@ -3,25 +3,50 @@ kind: Application
 metadata:
   name: nodejs-devops-app
   namespace: argocd
+  labels:
+    environment: dev
+    team: devops
 spec:
   project: default
+  
   source:
     repoURL: https://github.com/MouradOuammou/nodejs-devops-app.git
     targetRevision: HEAD
     path: helm/nodejs-devops-app
+    
     helm:
-      values: |
-        image:
-          repository: MouradOuammou/nodejs-devops-app
-          tag: latest
-        ingress:
-          enabled: false
+      valueFiles:
+        - values.yaml
+      
+      # Paramètres supplémentaires si nécessaire
+      parameters:
+        - name: image.pullPolicy
+          value: Always
+  
+  # Destination Kubernetes
   destination:
     server: https://kubernetes.default.svc
     namespace: devops-demo
+  
+  # Politique de synchronisation
   syncPolicy:
+    # Synchronisation automatique
     automated:
-      prune: true
-      selfHeal: true
+      prune: true        # Supprime les ressources supprimées du Git
+      selfHeal: true     # Corrige les dérives de configuration
+      allowEmpty: false  # Empêche les déploiements vides
+    
+    # Options de synchronisation
     syncOptions:
-    - CreateNamespace=true
+      - CreateNamespace=true     # Crée le namespace automatiquement
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    
+    # Politique de retry
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m0s
