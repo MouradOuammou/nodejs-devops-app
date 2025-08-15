@@ -1,24 +1,13 @@
 replicaCount: 2
 
 image:
-  repository: your-dockerhub-username/nodejs-devops-app
+  repository: mouradouammou/nodejs-devops-app
   tag: latest
   pullPolicy: IfNotPresent
 
 service:
   type: ClusterIP
   port: 3000
-
-ingress:
-  enabled: false
-  className: "nginx"
-  annotations: {}
-  hosts:
-    - host: nodejs-devops.example.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
 
 resources:
   limits:
