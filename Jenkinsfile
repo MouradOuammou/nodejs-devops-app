@@ -6,11 +6,11 @@ pipeline {
         NAMESPACE = 'devops-demo'
         SLACK_TOKEN_ID = 'slack-token-id'
         DOCKER_IMAGE_NAME = 'nodejs-devops-app'
-        DOCKER_HUB_USR = 'mouradouammou'  // Votre username Docker Hub
+        DOCKER_HUB_USR = 'mouradouammou'
 
         ARGOCD_APP_NAME = 'nodejs-devops-app'
         ARGOCD_NAMESPACE = 'argocd'
-        GIT_REPO_URL = 'git@github.com:MouradOuammou/nodejs-devops-app.git'  // Changé en SSH
+        GIT_REPO_URL = 'git@github.com:MouradOuammou/nodejs-devops-app.git'
         GIT_BRANCH = 'main'
 
         DEPLOY_TIMEOUT = 600 // secondes
