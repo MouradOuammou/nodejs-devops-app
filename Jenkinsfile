@@ -18,7 +18,9 @@ pipeline {
 
     stages {
         stage('Checkout') {
-            steps { checkout scm }
+            steps { 
+                git branch: "${GIT_BRANCH}", url: "${GIT_REPO_URL}" 
+            }
         }
 
         stage('Build Docker Image') {
@@ -59,28 +61,29 @@ pipeline {
 
         stage('Update Helm Values') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-token',
-                    usernameVariable: 'GIT_USERNAME',
-                    passwordVariable: 'GIT_TOKEN'
-                )]) {
-                    script {
-                        sh '''
-                           git config user.name "Mourad Ouammou"
-git config user.email "mourad.ouammou@example.com"
+                script {
+                    sh '''
+                        git config user.name "Mourad Ouammou"
+                        git config user.email "mourad.ouammou@example.com"
 
-                            git clone https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/MouradOuammou/nodejs-devops-app.git temp-repo
-                            cd temp-repo
+                        git clone ${GIT_REPO_URL} temp-repo
+                        cd temp-repo
 
-                            # Update image in Helm values.yaml using yq
-                            yq e -i ".image.repository = \"${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}\"" helm/${DOCKER_IMAGE_NAME}/values.yaml
-                            yq e -i ".image.tag = \"${BUILD_NUMBER}\"" helm/${DOCKER_IMAGE_NAME}/values.yaml
+                        # Installer yq si non présent
+                        if ! command -v yq &> /dev/null; then
+                            echo "Installing yq..."
+                            wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
+                            chmod +x /usr/local/bin/yq
+                        fi
 
-                            git add helm/${DOCKER_IMAGE_NAME}/values.yaml
-                            git commit -m "🚀 Update image ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}"
-                            git push origin ${GIT_BRANCH}
-                        '''
-                    }
+                        # Mise à jour des valeurs Helm
+                        yq e -i ".image.repository = \\"${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}\\"" helm/${DOCKER_IMAGE_NAME}/values.yaml
+                        yq e -i ".image.tag = \\"${BUILD_NUMBER}\\"" helm/${DOCKER_IMAGE_NAME}/values.yaml
+
+                        git add helm/${DOCKER_IMAGE_NAME}/values.yaml
+                        git commit -m "🚀 Update image ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}" || echo "No changes to commit"
+                        git push origin ${GIT_BRANCH}
+                    '''
                 }
             }
         }
@@ -89,7 +92,12 @@ git config user.email "mourad.ouammou@example.com"
             steps {
                 script {
                     sh '''
-                        # Sync application via ArgoCD CLI
+                        if ! command -v argocd &> /dev/null; then
+                            echo "Installing ArgoCD CLI..."
+                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.12.6/argocd-linux-amd64
+                            chmod +x /usr/local/bin/argocd
+                        fi
+
                         argocd app sync ${ARGOCD_APP_NAME} --namespace ${ARGOCD_NAMESPACE}
                         argocd app wait ${ARGOCD_APP_NAME} --namespace ${ARGOCD_NAMESPACE} --health --timeout ${DEPLOY_TIMEOUT}
                     '''
@@ -104,7 +112,7 @@ git config user.email "mourad.ouammou@example.com"
                 slackSend(
                     channel: '#nouveau-canal', 
                     color: "good",
-                    message: ":white_check_mark: Pipeline SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}\nImage: ${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}\nArgoCD App: ${ARGOCD_APP_NAME}\nNamespace: ${NAMESPACE}\nBuild URL: ${BUILD_URL}",
+                    message: ":white_check_mark: Pipeline SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}\nImage: ${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}\nArgoCD App: ${ARGOCD_APP_NAME}\nNamespace: ${NAMESPACE}\nBuild URL: ${env.BUILD_URL}",
                     tokenCredentialId: "${SLACK_TOKEN_ID}"
                 )
             }
@@ -115,7 +123,7 @@ git config user.email "mourad.ouammou@example.com"
                 slackSend(
                     channel: '#nouveau-canal',
                     color: "danger",
-                    message: ":x: Pipeline FAILED - ${JOB_NAME} #${BUILD_NUMBER}\nStage: ${STAGE_NAME}\nBuild URL: ${BUILD_URL}console",
+                    message: ":x: Pipeline FAILED - ${JOB_NAME} #${BUILD_NUMBER}\nStage: ${STAGE_NAME}\nBuild URL: ${env.BUILD_URL}console",
                     tokenCredentialId: "${SLACK_TOKEN_ID}"
                 )
             }
