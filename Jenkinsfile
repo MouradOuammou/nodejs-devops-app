@@ -6,20 +6,19 @@ pipeline {
         NAMESPACE = 'devops-demo'
         SLACK_TOKEN_ID = 'slack-token-id'
         DOCKER_IMAGE_NAME = 'nodejs-devops-app'
-        
-        // ArgoCD Configuration
+
         ARGOCD_APP_NAME = 'nodejs-devops-app'
         ARGOCD_NAMESPACE = 'argocd'
         GIT_REPO_URL = 'https://github.com/MouradOuammou/nodejs-devops-app.git'
         GIT_BRANCH = 'main'
-        
+
         DEPLOY_TIMEOUT = 600 // secondes
     }
 
     stages {
         stage('Checkout') {
-            steps { 
-                git branch: "${GIT_BRANCH}", url: "${GIT_REPO_URL}" 
+            steps {
+                git branch: "${GIT_BRANCH}", url: "${GIT_REPO_URL}"
             }
         }
 
@@ -69,12 +68,14 @@ pipeline {
                         git clone ${GIT_REPO_URL} temp-repo
                         cd temp-repo
 
-                        # Installer yq si non présent
-                        if ! command -v yq &> /dev/null; then
-                            echo "Installing yq..."
-                            wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
-                            chmod +x /usr/local/bin/yq
+                        # Installer yq dans le HOME si non présent
+                        YQ_BIN="$HOME/yq"
+                        if [ ! -x "$YQ_BIN" ]; then
+                            echo "Installing yq in $HOME..."
+                            wget -qO "$YQ_BIN" https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
+                            chmod +x "$YQ_BIN"
                         fi
+                        export PATH="$HOME:$PATH"
 
                         # Mise à jour des valeurs Helm
                         yq e -i ".image.repository = \\"${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}\\"" helm/${DOCKER_IMAGE_NAME}/values.yaml
@@ -94,8 +95,9 @@ pipeline {
                     sh '''
                         if ! command -v argocd &> /dev/null; then
                             echo "Installing ArgoCD CLI..."
-                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.12.6/argocd-linux-amd64
-                            chmod +x /usr/local/bin/argocd
+                            curl -sSL -o "$HOME/argocd" https://github.com/argoproj/argo-cd/releases/download/v2.12.6/argocd-linux-amd64
+                            chmod +x "$HOME/argocd"
+                            export PATH="$HOME:$PATH"
                         fi
 
                         argocd app sync ${ARGOCD_APP_NAME} --namespace ${ARGOCD_NAMESPACE}
@@ -110,7 +112,7 @@ pipeline {
         success {
             script {
                 slackSend(
-                    channel: '#nouveau-canal', 
+                    channel: '#nouveau-canal',
                     color: "good",
                     message: ":white_check_mark: Pipeline SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}\nImage: ${DOCKER_HUB_USR}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}\nArgoCD App: ${ARGOCD_APP_NAME}\nNamespace: ${NAMESPACE}\nBuild URL: ${env.BUILD_URL}",
                     tokenCredentialId: "${SLACK_TOKEN_ID}"
@@ -132,7 +134,6 @@ pipeline {
         always {
             script {
                 sh '''
-                    # Cleanup
                     rm -rf temp-repo || true
                     docker rmi ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} || true
                 '''
