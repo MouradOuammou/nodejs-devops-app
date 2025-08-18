@@ -1,7 +1,7 @@
 replicaCount: 2
 image:
   repository: mouradouammou/nodejs-devops-app
-  tag: "52"
+  tag: "53"
   pullPolicy: Always
 service:
   type: ClusterIP
