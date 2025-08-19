@@ -1,14 +1,11 @@
 replicaCount: 1
-
 image:
   repository: mouradouammou/nodejs-devops-app
-  tag: "latest"
+  tag: "56"
   pullPolicy: Always
-
 service:
   type: ClusterIP
   port: 3000
-
 resources:
   limits:
     cpu: 500m
@@ -16,25 +13,21 @@ resources:
   requests:
     cpu: 200m
     memory: 256Mi
-
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
-
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
   maxUnavailable: 1
-
 ingress:
   enabled: false
   className: ""
   hosts: []
   tls: []
   annotations: {}
-
 strategy:
   type: Recreate
   rollingUpdate:
